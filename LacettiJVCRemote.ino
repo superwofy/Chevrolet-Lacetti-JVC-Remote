@@ -1,6 +1,7 @@
 //Ref:
-//https://github.com/ronnied/holden-viva-jvc/blob/master/HoldenVivaJVC/HoldenVivaJVC.ino  analog values
-
+//https://github.com/ronnied/holden-viva-jvc/blob/master/HoldenVivaJVC/HoldenVivaJVC.ino 
+//https://pastebin.com/fXbScxV4 
+//https://github.com/kprega/Clio2JVC/blob/master/libraries/JvcRadio/commands_dfs.h
 
 // Protocol specifications:
 //   Pulse width                    527.5 µs
@@ -27,46 +28,46 @@
 //   0x15   21  0010101  Tuner Preset - / USB Folder -
 //   0x37   55  0110111  UNKNOWN, appears to be a sort of reset as well as a display test
 //   0x58   88  1011000  UNKNOWN, displays 'SN WRITING' where WRITING is blinking
-
+//  #define VOL_UP         0x04  // Volume up
+//  #define VOL_DOWN       0x05  // Volume down
+//  #define SOURCE         0x08  // Toggle source
+//  #define EQUALIZER      0x0D  // Equalizer
+//  #define MUTE           0x0E  // Mute
+//  #define TRACK_FORW     0x12  // Track forward
+//  #define TRACK_BACK     0x13  // Track backward
+//  #define FOLDER_FORW    0x14  // Track forward hold
+//  #define FOLDER_BACK    0x15  // Track backward hold
+//  #define VOICE_CONTROL  0x1A  // Voice control
+//  #define BTCALL         0x1B  // Answer bluetooth call (Not tested yet)
+//  #define POWER          0x80  // Power on/off (didn't work for KD-X342BT or KW-R510)
+//  #define UNKNOWN1       0x37  // Unknown function 1 (LCD test)
+//  #define UNKNOWN2       0x58  // Unknown function 2 (displays SN WRITING, then SN NG)
 
 
 #include <avr/power.h>
-#pragma GCC optimize ("-Ofast") // Max compiler optimisation level.
-#define DEBUG_MODE 0
 
-// Define commands
-#define VOLUP       0x04
-#define VOLDOWN     0x05
-#define SOURCE      0x08
-#define EQUALIZER   0x0D
-#define MUTE        0x0E
-#define TRACKFORW   0x12
-#define TRACKBACK   0x13
-#define FOLDERFORW  0x14
-#define FOLDERBACK  0x15
-#define UNKNOWN1    0x37
-#define UNKNOWN2    0x58
-
-#define OUTPUTPIN   10 // D10, Connect optocoupler input through a limiting resistor to this pin
-#define INPUTPIN	  0 // A0, Connect steering signal to this pin
-
-// Throttle input
-#define KEY_INTERVAL 50
-
-// Pulse width in µs
-#define PULSEWIDTH 527
- 
-// Address that the radio responds to
-#define ADDRESS 0x47
+// Configuration
+#pragma GCC optimize ("-Ofast")                                                               // Max compiler optimisation level.
+#define DEBUG_MODE     0                                                                      // Enable Serial. Uses lots of power
+#define VOL_UP         0x04                                                                   // Volume up
+#define VOL_DOWN       0x05                                                                   // Volume down
+#define SOURCE         0x08                                                                   // Toggle source
+#define MUTE           0x0E                                                                   // Mute
+#define TRACK_FORW     0x12                                                                   // Track forward
+#define OUTPUTPIN      10                                                                     // D10, Connect optocoupler input through a limiting resistor to this pin
+#define INPUTPIN	     0                                                                      // A0, Connect steering signal to this pin
+#define KEY_INTERVAL   5                                                                      // Throttle input (ms)
+#define PULSEWIDTH     527                                                                    // Pulse width (µs)
+#define ADDRESS        0x47                                                                   // Address that the radio responds to
 
 unsigned long timer;
 
 void setup() {
-  pinMode(OUTPUTPIN, OUTPUT);    // Set the proper pin as output
-  digitalWrite(OUTPUTPIN, LOW);  // Output LOW to make sure optocoupler is off
+  pinMode(OUTPUTPIN, OUTPUT);                                                                 // Set the proper pin as output
+  digitalWrite(OUTPUTPIN, LOW);                                                               // Output LOW to make sure optocoupler is off
   disable_peripherals();
   #if DEBUG_MODE
-    Serial.begin(115200);
+    Serial.begin(38400);
     while(!Serial);
     Serial.println("Ready to receive");
   #endif
@@ -75,9 +76,9 @@ void setup() {
 
 
 void loop() {
-  unsigned char Key = GetInput();  // If any buttons are being pressed the GetInput() function will return the appropriate command code
+  int Key = GetInput();                                                                       // If any buttons are being pressed the GetInput() function will return the appropriate command code
 
-  if (Key) {  						// If no buttons are being pressed the function will have returned 0 and no command will be sent
+  if (Key) {  						                                                                    // If no buttons are being pressed the function will have returned 0 and no command will be sent
     if (millis() - timer >= KEY_INTERVAL){     
       SendCommand(Key);
       timer = millis();
@@ -86,30 +87,25 @@ void loop() {
 }
 
 
-unsigned char GetInput(void) {
+int GetInput(void) {
   int s = analogRead(INPUTPIN);
-  if (s > 750) {                                            //De-bounce, ignore rest state, recognize switch with lowest priority (PWR/Mute)
-//    #if DEBUG_MODE
-//      Serial.print("Car->Adapter analog value: ");
-//      Serial.println(s);
-//    #endif
-    if(s > 1010)
-      return VOLDOWN;
-    if(s > 985)
-      return VOLUP;
-    if(s > 940)
-      return TRACKFORW;
-    if(s > 870)
-      return SOURCE;
+  if (s > 1021)
+    return VOL_DOWN;
+  if(s > 985 && s < 995)
+    return VOL_UP;
+  if(s > 940 && s < 951)
+    return TRACK_FORW;
+  if(s > 875 && s < 885)
+    return SOURCE;
+  if (s > 755 && s < 765)
     return MUTE;
-  }
   return 0;
 }
 
 
 void SendValue(unsigned char value) {
-  unsigned char i, tmp = 1;
-  for (i = 0; i < sizeof(value) * 8 - 1; i++) {
+  unsigned char tmp = 1;
+  for (int i = 0; i < sizeof(value) * 8 - 1; i++) {
     if (value & tmp)  // Do a bitwise AND on the value and tmp
       SendOne();
     else
@@ -118,45 +114,40 @@ void SendValue(unsigned char value) {
   }
 }
  
-// Send a command to the radio, including the header, start bit, address and stop bits
-void SendCommand(unsigned char value) {
+void SendCommand(int value) {                                                                   // Send a command to the radio, including the header, start bit, address and stop bits
   #if DEBUG_MODE
     Serial.print("Car->Adapter: ");
     Serial.println(value);
   #endif
-  unsigned char i;
-  Preamble();                         // Send signals to precede a command to the radio
-  for (i = 0; i < 3; i++) {           // Repeat address, command and stop bits three times so radio will pick them up properly
-    SendValue(ADDRESS);               // Send the address
-    SendValue((unsigned char)value);  // Send the command
-    Postamble();                      // Send signals to follow a command to the radio
-  }
+  Preamble();                                                                                   // Send signals to precede a command to the radio                                                                      
+  SendValue(ADDRESS);                                                                           // Send the address
+  SendValue(value);                                                                             // Send the command
+  Postamble();                                                                                  // Send signals to follow a command to the radio
 }
  
 // Signals to transmit a '0' bit
 void SendZero() {
-  digitalWrite(OUTPUTPIN, HIGH);      // Output HIGH for 1 pulse width
+  digitalWrite(OUTPUTPIN, HIGH);                                                                // Output HIGH for 1 pulse width
   delayMicroseconds(PULSEWIDTH);
-  digitalWrite(OUTPUTPIN, LOW);       // Output LOW for 1 pulse width
+  digitalWrite(OUTPUTPIN, LOW);                                                                 // Output LOW for 1 pulse width
   delayMicroseconds(PULSEWIDTH);
 }
  
 // Signals to transmit a '1' bit
 void SendOne() {
-  digitalWrite(OUTPUTPIN, HIGH);      // Output HIGH for 1 pulse width
+  digitalWrite(OUTPUTPIN, HIGH);                                                                // Output HIGH for 1 pulse width
   delayMicroseconds(PULSEWIDTH);
-  digitalWrite(OUTPUTPIN, LOW);       // Output LOW for 3 pulse widths
+  digitalWrite(OUTPUTPIN, LOW);                                                                 // Output LOW for 3 pulse widths
   delayMicroseconds(PULSEWIDTH * 3);
 }
  
 // Signals to precede a command to the radio
-void Preamble() {
-  // HEADER: always LOW (1 pulse width), HIGH (16 pulse widths), LOW (8 pulse widths)
-  digitalWrite(OUTPUTPIN, LOW);       // Make sure output is LOW for 1 pulse width, so the header starts with a rising edge
+void Preamble() {                                                                               // HEADER: always LOW (1 pulse width), HIGH (16 pulse widths), LOW (8 pulse widths)
+  digitalWrite(OUTPUTPIN, LOW);                                                                 // Make sure output is LOW for 1 pulse width, so the header starts with a rising edge
   delayMicroseconds(PULSEWIDTH * 1);
-  digitalWrite(OUTPUTPIN, HIGH);      // Start of header, output HIGH for 16 pulse widths
+  digitalWrite(OUTPUTPIN, HIGH);                                                                // Start of header, output HIGH for 16 pulse widths
   delayMicroseconds(PULSEWIDTH * 16);
-  digitalWrite(OUTPUTPIN, LOW);       // Second part of header, output LOW 8 pulse widths
+  digitalWrite(OUTPUTPIN, LOW);                                                                 // Second part of header, output LOW 8 pulse widths
   delayMicroseconds(PULSEWIDTH * 8);
   
   // START BIT: always 1
@@ -179,7 +170,7 @@ void disable_peripherals(){
   power_timer2_disable();
   power_timer3_disable();
   #if !DEBUG_MODE
-    delay(5000);
-    power_usb_disable();                                                                        // After radio boots up, disable the USB module. 5s should allow sketch upload.
+    delay(4000);
+    power_usb_disable();                                                                        // After radio boots up, disable the USB module. 4s should allow sketch upload.
   #endif
 }
